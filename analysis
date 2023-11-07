@@ -1,0 +1,409 @@
+-- CTE for Customer Profitability
+-- This CTE calculates the total spend for each customer in the last 12 months.
+WITH CustomerProfitability AS (
+  SELECT
+    c.customer_id, -- Select the customer ID
+    SUM(t.purchase_amount) AS total_spend -- Calculate the total spend for each customer
+  FROM
+    customers c -- From the customers table
+  JOIN
+    transactions t ON c.customer_id = t.customer_id -- Join with transactions table on customer ID
+  WHERE
+    t.purchase_date BETWEEN DATEADD(year, -1, GETDATE()) AND GETDATE() -- Filter transactions to the last 12 months
+  GROUP BY
+    c.customer_id -- Group the results by customer ID
+)
+-- Final select to retrieve the results from the CTE
+SELECT 
+  * 
+FROM 
+  CustomerProfitability;
+
+
+-- Extending Customer Profitability with Demographics
+-- This query segments customers by profitability and includes demographic information.
+WITH CustomerProfitability AS (
+  SELECT
+    c.customer_id, -- Select the customer ID
+    SUM(t.purchase_amount) AS total_spend, -- Calculate the total spend for each customer
+    c.age, -- Include customer's age
+    c.gender, -- Include customer's gender
+    c.location -- Include customer's location
+  FROM
+    customers c -- From the customers table
+  JOIN
+    transactions t ON c.customer_id = t.customer_id -- Join with transactions table on customer ID
+  WHERE
+    t.purchase_date BETWEEN DATEADD(year, -1, GETDATE()) AND GETDATE() -- Filter transactions to the last 12 months
+  GROUP BY
+    c.customer_id, c.age, c.gender, c.location -- Group the results by customer ID and demographic information
+)
+-- Select statement to retrieve the results from the CTE with demographic details
+SELECT 
+  * 
+FROM 
+  CustomerProfitability
+ORDER BY 
+  total_spend DESC; -- Order the results by total spend in descending order to see the most profitable customers at the top
+
+
+-- Ad Performance Analysis
+-- This query calculates key ad performance metrics for each ad creative.
+WITH AdPerformance AS (
+  SELECT
+    ad_id, -- Select the ad ID
+    platform, -- Platform where the ad was shown (Facebook or Instagram)
+    SUM(impressions) AS total_impressions, -- Total number of times the ad was shown
+    SUM(clicks) AS total_clicks, -- Total number of clicks on the ad
+    SUM(total_spend) AS total_spend, -- Total amount of money spent on the ad
+    SUM(conversions) AS total_conversions, -- Total number of conversions from the ad
+    CASE 
+      WHEN SUM(impressions) = 0 THEN 0 
+      ELSE SUM(clicks) * 1.0 / SUM(impressions) 
+    END AS CTR, -- Click-Through Rate calculated as total clicks divided by total impressions
+    CASE 
+      WHEN SUM(clicks) = 0 THEN 0 
+      ELSE SUM(total_spend) / SUM(clicks) 
+    END AS CPC, -- Cost Per Click calculated as total spend divided by total clicks
+    CASE 
+      WHEN SUM(total_spend) = 0 THEN 0 
+      ELSE SUM(conversions) * 1.0 / SUM(total_spend) 
+    END AS ROAS -- Return On Ad Spend calculated as total conversions divided by total spend
+  FROM
+    ad_metrics -- From the ad_metrics table
+  WHERE
+    ad_start_date BETWEEN DATEADD(year, -1, GETDATE()) AND GETDATE() -- Filter ads to the last 12 months
+  GROUP BY
+    ad_id, platform -- Group the results by ad ID and platform
+)
+-- Select statement to retrieve the results from the CTE with ad performance metrics
+SELECT 
+  * 
+FROM 
+  AdPerformance
+ORDER BY 
+  total_spend DESC; -- Order the results by total spend in descending order to see the ads with the highest investment at the top
+
+
+-- Combined Customer Segmentation and Ad Performance Analysis
+WITH CustomerProfitability AS (
+  -- [previous CustomerProfitability CTE code]
+),
+AdPerformance AS (
+  -- [previous AdPerformance CTE code]
+),
+CustomerAdInteractions AS (
+  SELECT
+    cp.customer_id,
+    cp.age,
+    cp.gender,
+    cp.location,
+    cp.total_spend AS customer_total_spend,
+    ap.ad_id,
+    ap.platform,
+    ap.CTR,
+    ap.CPC,
+    ap.ROAS
+  FROM
+    CustomerProfitability cp
+  JOIN
+    transactions t ON cp.customer_id = t.customer_id
+  JOIN
+    ad_metrics am ON t.ad_id = am.ad_id
+  JOIN
+    AdPerformance ap ON am.ad_id = ap.ad_id
+  WHERE
+    am.ad_start_date BETWEEN DATEADD(year, -1, GETDATE()) AND GETDATE()
+)
+-- Select statement to retrieve the results from the CustomerAdInteractions CTE
+SELECT 
+  * 
+FROM 
+  CustomerAdInteractions
+ORDER BY 
+  customer_total_spend DESC, CTR DESC; -- Order by customer total spend and CTR to prioritize high spend and high engagement
+
+
+
+-- Attribution Model Refinement
+WITH CustomerProfitability AS (
+  -- [previous CustomerProfitability CTE code]
+),
+AdPerformance AS (
+  -- [previous AdPerformance CTE code]
+),
+AdInteractions AS (
+  SELECT
+    customer_id,
+    ad_id,
+    MAX(interaction_date) AS last_interaction_date
+  FROM
+    ad_interaction
+  WHERE
+    interaction_date BETWEEN DATEADD(year, -1, GETDATE()) AND GETDATE()
+  GROUP BY
+    customer_id, ad_id
+),
+AttributedPurchases AS (
+  SELECT
+    ai.customer_id,
+    ai.ad_id,
+    COUNT(t.transaction_id) AS number_of_purchases,
+    SUM(t.purchase_amount) AS total_purchase_amount
+  FROM
+    AdInteractions ai
+  JOIN
+    transactions t ON ai.customer_id = t.customer_id
+  WHERE
+    t.purchase_date >= ai.last_interaction_date
+  GROUP BY
+    ai.customer_id, ai.ad_id
+),
+CustomerAdInteractions AS (
+  SELECT
+    cp.customer_id,
+    cp.age,
+    cp.gender,
+    cp.location,
+    cp.total_spend AS customer_total_spend,
+    ap.ad_id,
+    ap.platform,
+    ap.CTR,
+    ap.CPC,
+    ap.ROAS,
+    atp.number_of_purchases,
+    atp.total_purchase_amount
+  FROM
+    CustomerProfitability cp
+  JOIN
+    AttributedPurchases atp ON cp.customer_id = atp.customer_id
+  JOIN
+    AdPerformance ap ON atp.ad_id = ap.ad_id
+)
+-- Select statement to retrieve the results from the CustomerAdInteractions CTE
+SELECT 
+  * 
+FROM 
+  CustomerAdInteractions
+ORDER BY 
+  total_purchase_amount DESC, CTR DESC; -- Order by total purchase amount attributed to the ad and CTR to prioritize high revenue generation and high engagement
+
+
+
+-- Time Series Analysis for Ad Performance Metrics
+WITH AdPerformance AS (
+  -- [previous AdPerformance CTE code]
+),
+AdPerformanceTimeSeries AS (
+  SELECT
+    ad_id,
+    platform,
+    CAST(ad_start_date AS DATE) AS ad_date, -- Cast datetime to date for daily granularity
+    SUM(impressions) AS daily_impressions,
+    SUM(clicks) AS daily_clicks,
+    SUM(total_spend) AS daily_spend,
+    SUM(conversions) AS daily_conversions
+  FROM
+    ad_metrics
+  WHERE
+    ad_start_date BETWEEN DATEADD(year, -1, GETDATE()) AND GETDATE() -- Focus on the last 12 months
+  GROUP BY
+    ad_id, platform, CAST(ad_start_date AS DATE)
+)
+-- Select statement to retrieve daily ad performance metrics
+SELECT 
+  * 
+FROM 
+  AdPerformanceTimeSeries
+ORDER BY 
+  ad_date DESC; -- Order by date to see the most recent performance
+
+
+
+-- Cohort Analysis based on the First Purchase Date
+WITH FirstPurchase AS (
+  SELECT
+    customer_id,
+    MIN(purchase_date) AS cohort_date
+  FROM
+    transactions
+  GROUP BY
+    customer_id
+),
+CohortPerformance AS (
+  SELECT
+    fp.customer_id,
+    fp.cohort_date,
+    COUNT(t.transaction_id) AS number_of_purchases,
+    SUM(t.purchase_amount) AS total_purchase_amount
+  FROM
+    FirstPurchase fp
+  JOIN
+    transactions t ON fp.customer_id = t.customer_id
+  GROUP BY
+    fp.customer_id, fp.cohort_date
+)
+-- Select statement to retrieve the cohort performance metrics
+SELECT 
+  cohort_date,
+  COUNT(DISTINCT customer_id) AS cohort_size,
+  SUM(number_of_purchases) AS total_purchases,
+  SUM(total_purchase_amount) AS total_revenue
+FROM 
+  CohortPerformance
+GROUP BY 
+  cohort_date
+ORDER BY 
+  cohort_date; -- Order by cohort date to see the performance of each cohort over time
+
+
+
+-- Analysis of Ad Creatives
+WITH AdCreativePerformance AS (
+  SELECT
+    am.ad_id,
+    am.creative_id, -- Assuming we have a creative ID to differentiate ad creatives
+    ap.platform,
+    SUM(ap.clicks) AS total_clicks,
+    SUM(ap.conversions) AS total_conversions,
+    AVG(ap.CTR) AS average_ctr,
+    AVG(ap.CPC) AS average_cpc,
+    AVG(ap.ROAS) AS average_roas
+  FROM
+    ad_metrics am
+  JOIN
+    AdPerformance ap ON am.ad_id = ap.ad_id
+  WHERE
+    am.ad_start_date BETWEEN DATEADD(year, -1, GETDATE()) AND GETDATE()
+  GROUP BY
+    am.ad_id, am.creative_id, ap.platform
+)
+-- Select statement to retrieve ad creative performance metrics
+SELECT 
+  * 
+FROM 
+  AdCreativePerformance
+ORDER BY 
+  average_roas DESC, average_ctr DESC; -- Order by ROAS and CTR to prioritize ad creatives with the highest return and engagement
+
+
+
+-- Trend Analysis for Ad Performance Over Time
+WITH AdPerformance AS (
+  -- [previous AdPerformance CTE code]
+),
+AdPerformanceTrend AS (
+  SELECT
+    ad_id,
+    platform,
+    ad_date,
+    daily_impressions,
+    daily_clicks,
+    daily_spend,
+    daily_conversions,
+    -- Calculate 7-day rolling averages for impressions, clicks, spend, and conversions
+    AVG(daily_impressions) OVER (PARTITION BY ad_id ORDER BY ad_date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS rolling_avg_impressions,
+    AVG(daily_clicks) OVER (PARTITION BY ad_id ORDER BY ad_date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS rolling_avg_clicks,
+    AVG(daily_spend) OVER (PARTITION BY ad_id ORDER BY ad_date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS rolling_avg_spend,
+    AVG(daily_conversions) OVER (PARTITION BY ad_id ORDER BY ad_date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS rolling_avg_conversions
+  FROM
+    AdPerformance
+)
+-- Select statement to retrieve the trend analysis results
+SELECT 
+  * 
+FROM 
+  AdPerformanceTrend
+ORDER BY 
+  ad_date DESC;
+
+
+
+-- Advanced Cohort Analysis with Retention and LTV
+WITH CohortData AS (
+  -- [previous FirstPurchase CTE code]
+),
+CohortRetention AS (
+  SELECT
+    cohort_date,
+    DATEADD(month, DATEDIFF(month, cohort_date, purchase_date), 0) AS cohort_month,
+    customer_id
+  FROM
+    CohortData
+  JOIN
+    transactions ON CohortData.customer_id = transactions.customer_id
+  GROUP BY
+    cohort_date,
+    DATEADD(month, DATEDIFF(month, cohort_date, purchase_date), 0),
+    customer_id
+),
+CohortLTV AS (
+  SELECT
+    cohort_date,
+    customer_id,
+    SUM(purchase_amount) AS ltv
+  FROM
+    transactions t
+  JOIN
+    CohortData cd ON t.customer_id = cd.customer_id
+  GROUP BY
+    cohort_date,
+    customer_id
+)
+-- Select statement to retrieve the retention and LTV by cohort
+SELECT 
+  cohort_date,
+  COUNT(DISTINCT customer_id) AS cohort_size,
+  COUNT(DISTINCT CASE WHEN cohort_month = cohort_date THEN customer_id END) AS month_1_retention,
+  -- Add similar COUNT DISTINCT CASE WHEN statements for further months to track retention over time
+  AVG(ltv) AS average_ltv
+FROM 
+  CohortRetention
+JOIN
+  CohortLTV USING (cohort_date, customer_id)
+GROUP BY 
+  cohort_date
+ORDER BY 
+  cohort_date;
+
+
+
+-- Purchasing Behavior Analysis
+WITH PurchaseFrequency AS (
+  SELECT
+    customer_id,
+    COUNT(transaction_id) AS total_purchases,
+    MAX(purchase_date) AS last_purchase_date,
+    DATEDIFF(day, MIN(purchase_date), MAX(purchase_date)) / NULLIF(COUNT(transaction_id) - 1, 0) AS avg_days_between_purchases
+  FROM
+    transactions
+  GROUP BY
+    customer_id
+),
+CategoryPreferences AS (
+  SELECT
+    customer_id,
+    category, -- Assuming there is a 'category' column in transactions
+    COUNT(transaction_id) AS purchases_per_category
+  FROM
+    transactions
+  GROUP BY
+    customer_id, category
+)
+-- Select statement to combine frequency and category preference analysis
+SELECT 
+  pf.customer_id,
+  pf.total_purchases,
+  pf.last_purchase_date,
+  pf.avg_days_between_purchases,
+  cp.category,
+  cp.purchases_per_category
+FROM 
+  PurchaseFrequency pf
+JOIN
+  CategoryPreferences cp ON pf.customer_id = cp.customer_id
+ORDER BY 
+  pf.total_purchases DESC, cp.purchases_per_category DESC;
+
+
+
